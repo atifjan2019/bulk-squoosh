@@ -18,5 +18,14 @@
       ]
     }
   ],
-  "redirects": [{ "source": "/editor", "destination": "/" }]
+  "redirects": [
+    {
+      "source": "/editor",
+      "destination": "/"
+    },
+    {
+      "source": "/bulk",
+      "destination": "/"
+    }
+  ]
 }

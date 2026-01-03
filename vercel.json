@@ -5,6 +5,16 @@
         }
     },
     "outputDirectory": "build",
+    "redirects": [
+        {
+            "source": "/editor",
+            "destination": "/"
+        },
+        {
+            "source": "/bulk",
+            "destination": "/"
+        }
+    ],
     "rewrites": [
         {
             "source": "/(.*)",

@@ -5,22 +5,16 @@ import 'add-css:./style.css';
 import type SnackBarElement from 'shared/custom-els/snack-bar';
 import WorkerBridge from 'client/lazy-app/worker-bridge';
 import {
-    blobToImg,
     builtinDecode,
-    sniffMimeType,
-    canDecodeImageType,
 } from 'client/lazy-app/util';
 import {
     encoderMap,
     EncoderState,
-    defaultProcessorState,
-    defaultPreprocessorState,
     EncoderType,
 } from 'client/lazy-app/feature-meta';
-import { drawableToImageData } from 'client/lazy-app/util/canvas';
 
 interface Props {
-    files: File[];
+    files?: File[];
     showSnack: SnackBarElement['showSnackbar'];
     onBack: () => void;
 }
@@ -37,31 +31,47 @@ interface ProcessedFile {
 interface State {
     processedFiles: ProcessedFile[];
     processing: boolean;
+    selectedFormat: EncoderType;
+    quality: number;
 }
+
+const formatOptions: { value: EncoderType; label: string }[] = [
+    { value: 'mozJPEG', label: 'MozJPEG' },
+    { value: 'webP', label: 'WebP' },
+    { value: 'avif', label: 'AVIF' },
+    { value: 'oxiPNG', label: 'OxiPNG' },
+    { value: 'jxl', label: 'JPEG XL' },
+];
 
 export default class BulkCompress extends Component<Props, State> {
     private workerBridge = new WorkerBridge();
+    private fileInput: HTMLInputElement | null = null;
 
     constructor(props: Props) {
         super(props);
         this.state = {
-            processedFiles: props.files.map(f => ({
+            processedFiles: props.files ? props.files.map(f => ({
                 original: f,
                 status: 'pending'
-            })),
-            processing: false
+            })) : [],
+            processing: false,
+            selectedFormat: 'mozJPEG',
+            quality: 75,
         };
     }
 
     componentDidMount() {
-        this.processFiles();
+        if (this.state.processedFiles.length > 0) {
+            this.processFiles();
+        }
     }
 
     async processFiles() {
+        if (this.state.processing) return;
         this.setState({ processing: true });
-        const { processedFiles } = this.state;
 
-        // Process sequentially for now to be safe
+        const { processedFiles, selectedFormat, quality } = this.state;
+
         for (let i = 0; i < processedFiles.length; i++) {
             const fileData = processedFiles[i];
             if (fileData.status !== 'pending') continue;
@@ -70,7 +80,7 @@ export default class BulkCompress extends Component<Props, State> {
 
             try {
                 const file = fileData.original;
-                const result = await this.compressFile(file);
+                const result = await this.compressFile(file, selectedFormat, quality);
 
                 this.setState(prevState => {
                     const newFiles = [...prevState.processedFiles];
@@ -99,6 +109,29 @@ export default class BulkCompress extends Component<Props, State> {
         this.setState({ processing: false });
     }
 
+    openFilePicker = () => {
+        if (this.fileInput) {
+            this.fileInput.click();
+        }
+    }
+
+    onFileChange = (e: Event) => {
+        const input = e.target as HTMLInputElement;
+        if (input.files && input.files.length > 0) {
+            const newFiles = Array.from(input.files).map(f => ({
+                original: f,
+                status: 'pending' as const
+            }));
+
+            this.setState(prevState => ({
+                processedFiles: [...prevState.processedFiles, ...newFiles]
+            }), () => {
+                this.processFiles();
+            });
+        }
+        input.value = '';
+    }
+
     updateFileStatus(index: number, status: ProcessedFile['status']) {
         this.setState(prevState => {
             const newFiles = [...prevState.processedFiles];
@@ -107,107 +140,244 @@ export default class BulkCompress extends Component<Props, State> {
         });
     }
 
-    async compressFile(file: File): Promise<Blob> {
-        // 1. Decode
-        // Simple decoding for now, similar to Compress/index.tsx but simplified
-        const mimeType = await sniffMimeType(file);
-        // We assume it's decodable by browser for now for simplicity, 
-        // or fall back to builtinDecode which handles some cases.
-        // Ideally we'd copy the robust decoding logic from Compress/index.tsx
-
-        const signal = new AbortController().signal; // Dummy signal
+    async compressFile(file: File, format: EncoderType, quality: number): Promise<Blob> {
+        const signal = new AbortController().signal;
         let decoded: ImageData;
 
-        // Try built-in decode first
         try {
             decoded = await builtinDecode(signal, file);
         } catch (e) {
-            // If built-in fails, try worker decoders if needed, but let's stick to basic Support first
             throw new Error('Could not decode image');
         }
 
-        // 2. Preprocess (Identity for now)
-        // We can add resizing options later if user requests
+        const encoder = encoderMap[format];
+        const options = { ...encoder.meta.defaultOptions };
 
-        // 3. Compress
-        // Default to MozJPEG for now, or ensure we pick a good default based on input?
-        // Let's rely on MozJPEG as a safe default for opaque, OxiPNG for transparent?
-        // Checking alpha channel is expensive without analyzing image data, so let's default to MozJPEG for now.
+        // Apply quality setting where applicable
+        if ('quality' in options) {
+            (options as any).quality = quality;
+        }
 
-        const encoderState: EncoderState = {
-            type: 'mozJPEG',
-            options: encoderMap.mozJPEG.meta.defaultOptions,
-        };
-
-        const encoder = encoderMap[encoderState.type];
         const compressedData = await encoder.encode(
             signal,
             this.workerBridge,
             decoded,
-            encoderState.options as any
+            options as any
         );
 
         return new Blob([compressedData], { type: encoder.meta.mimeType });
     }
 
-    async downloadAll() {
-        // Implement zip download later if needed
-        // For now just alert or something
+    onFormatChange = (e: Event) => {
+        const target = e.target as HTMLSelectElement;
+        this.setState({ selectedFormat: target.value as EncoderType });
     }
 
-    render({ onBack }: Props, { processedFiles, processing }: State) {
+    onQualityChange = (e: Event) => {
+        const target = e.target as HTMLInputElement;
+        this.setState({ quality: parseInt(target.value, 10) });
+    }
+
+    clearAll = () => {
+        this.state.processedFiles.forEach(f => {
+            if (f.resultUrl) URL.revokeObjectURL(f.resultUrl);
+        });
+        this.setState({ processedFiles: [], processing: false });
+    }
+
+    downloadAll = () => {
+        this.state.processedFiles.forEach(file => {
+            if (file.status === 'done' && file.resultUrl) {
+                const a = document.createElement('a');
+                a.href = file.resultUrl;
+                const ext = encoderMap[this.state.selectedFormat].meta.mimeType.split('/')[1];
+                a.download = `squooshed-${file.original.name.replace(/\.[^/.]+$/, "")}.${ext}`;
+                a.click();
+            }
+        });
+    }
+
+    getCompletedCount() {
+        return this.state.processedFiles.filter(f => f.status === 'done').length;
+    }
+
+    getTotalSaved() {
+        return this.state.processedFiles.reduce((acc, f) => {
+            if (f.status === 'done' && f.resultSize) {
+                return acc + (f.original.size - f.resultSize);
+            }
+            return acc;
+        }, 0);
+    }
+
+    render({ onBack }: Props, { processedFiles, processing, selectedFormat, quality }: State) {
+        const completedCount = this.getCompletedCount();
+        const totalSaved = this.getTotalSaved();
+        const hasFiles = processedFiles.length > 0;
+
         return (
             <div class={style.bulkCompress}>
                 <div class={style.header}>
                     <button class={style.back} onClick={onBack}>
-                        <svg viewBox="-50 -50 200 200">
-                            <path
-                                d="M34.6 83.4c-9.5 7.1-23.8 6.5-32-2.9-7-8.1-6.1-20.7 2.1-28.9L49.6 4.7C59.1-2.4 73.4-1.8 81.6 7.6c7 8.1 6.1 20.7-2.1 28.9L34.6 83.4z"
-                                class={style.backBlob}
-                                transform="rotate(-45 50 50)"
-                            />
-                            <path
-                                d="M24 24 L76 76 M76 24 L24 76"
-                                stroke="white"
-                                stroke-width="8"
-                                stroke-linecap="round"
-                                class={style.backX}
-                            />
+                        <svg viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
                         </svg>
                     </button>
                     <h1>Bulk Squoosh</h1>
                 </div>
+
                 <div class={style.content}>
-                    <div class={style.status}>
-                        {processing ? 'Processing...' : 'Done'}
+                    {/* Settings Panel */}
+                    <div class={style.settingsPanel}>
+                        <div class={style.settingsRow}>
+                            <div class={style.settingGroup}>
+                                <label class={style.settingLabel}>Output Format</label>
+                                <select
+                                    class={style.formatSelect}
+                                    value={selectedFormat}
+                                    onChange={this.onFormatChange}
+                                    disabled={processing}
+                                >
+                                    {formatOptions.map(opt => (
+                                        <option value={opt.value}>{opt.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div class={style.settingGroup}>
+                                <label class={style.settingLabel}>Quality: {quality}%</label>
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="100"
+                                    value={quality}
+                                    onInput={this.onQualityChange}
+                                    class={style.qualitySlider}
+                                    disabled={processing}
+                                />
+                            </div>
+                        </div>
+
+                        <div class={style.actionButtons}>
+                            <button class={style.primaryBtn} onClick={this.openFilePicker} disabled={processing}>
+                                <svg viewBox="0 0 24 24" class={style.btnIcon}>
+                                    <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+                                </svg>
+                                Add Images
+                            </button>
+                            <input
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                ref={el => this.fileInput = el}
+                                onChange={this.onFileChange}
+                                style={{ display: 'none' }}
+                            />
+                            {hasFiles && (
+                                <div class={style.actionButtons}>
+                                    <button class={style.secondaryBtn} onClick={this.downloadAll} disabled={processing || completedCount === 0}>
+                                        <svg viewBox="0 0 24 24" class={style.btnIcon}>
+                                            <path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                                        </svg>
+                                        Download All
+                                    </button>
+                                    <button class={style.dangerBtn} onClick={this.clearAll} disabled={processing}>
+                                        Clear All
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
-                    <ul class={style.fileList}>
-                        {processedFiles.map(file => (
-                            <li class={style.fileItem}>
-                                <div class={style.fileInfo}>
-                                    <div>{file.original.name}</div>
-                                    <div class={style.fileMeta}>
-                                        Original: {(file.original.size / 1024).toFixed(2)} KB
-                                    </div>
+                    {/* Stats */}
+                    {hasFiles && (
+                        <div class={style.statsBar}>
+                            <div class={style.stat}>
+                                <span class={style.statValue}>{processedFiles.length}</span>
+                                <span class={style.statLabel}>Total</span>
+                            </div>
+                            <div class={style.stat}>
+                                <span class={style.statValue}>{completedCount}</span>
+                                <span class={style.statLabel}>Completed</span>
+                            </div>
+                            <div class={style.stat}>
+                                <span class={`${style.statValue} ${style.savedValue}`}>
+                                    {totalSaved > 0 ? `${(totalSaved / 1024).toFixed(1)} KB` : '—'}
+                                </span>
+                                <span class={style.statLabel}>Saved</span>
+                            </div>
+                            {processing && (
+                                <div class={style.processingIndicator}>
+                                    <div class={style.spinner}></div>
+                                    Processing...
                                 </div>
-                                <div class={style.fileStatus}>
-                                    {file.status === 'pending' && '⏳'}
-                                    {file.status === 'processing' && '⚙️'}
-                                    {file.status === 'error' && '❌ ' + file.error}
-                                    {file.status === 'done' && (
-                                        <div class={style.resultInfo}>
-                                            <span>{(file.resultSize! / 1024).toFixed(2)} KB</span>
-                                            <span class={style.savings}>
-                                                ({Math.round((1 - file.resultSize! / file.original.size) * 100)}% saved)
-                                            </span>
-                                            <a href={file.resultUrl} download={`squooshed-${file.original.name.replace(/\.[^/.]+$/, "")}.jpg`} class={style.downloadBtn}>⬇️</a>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Empty State */}
+                    {!hasFiles && (
+                        <div class={style.emptyState}>
+                            <svg viewBox="0 0 24 24" class={style.emptyIcon}>
+                                <path fill="currentColor" d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4.86 8.86l-3 3.87L9 13.14 6 17h12l-3.86-5.14z" />
+                            </svg>
+                            <h2>No images yet</h2>
+                            <p>Click "Add Images" to start compressing</p>
+                        </div>
+                    )}
+
+                    {/* File List */}
+                    {hasFiles && (
+                        <ul class={style.fileList}>
+                            {processedFiles.map((file, index) => (
+                                <li class={style.fileItem} key={index}>
+                                    <div class={style.fileInfo}>
+                                        <div class={style.fileName}>{file.original.name}</div>
+                                        <div class={style.fileMeta}>
+                                            Original: {(file.original.size / 1024).toFixed(1)} KB
+                                            {file.status === 'done' && file.resultSize && (
+                                                <span class={style.arrow}> → </span>
+                                            )}
+                                            {file.status === 'done' && file.resultSize && (
+                                                <span class={style.compressedSize}>
+                                                    {(file.resultSize / 1024).toFixed(1)} KB
+                                                </span>
+                                            )}
                                         </div>
-                                    )}
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
+                                    </div>
+                                    <div class={style.fileStatus}>
+                                        {file.status === 'pending' && (
+                                            <span class={style.statusPending}>Waiting</span>
+                                        )}
+                                        {file.status === 'processing' && (
+                                            <span class={style.statusProcessing}>
+                                                <div class={style.spinnerSmall}></div>
+                                            </span>
+                                        )}
+                                        {file.status === 'error' && (
+                                            <span class={style.statusError}>Failed</span>
+                                        )}
+                                        {file.status === 'done' && (
+                                            <div class={style.doneActions}>
+                                                <span class={style.savings}>
+                                                    {Math.round((1 - file.resultSize! / file.original.size) * 100)}% saved
+                                                </span>
+                                                <a
+                                                    href={file.resultUrl}
+                                                    download={`squooshed-${file.original.name.replace(/\.[^/.]+$/, "")}.${encoderMap[selectedFormat].meta.mimeType.split('/')[1]}`}
+                                                    class={style.downloadBtn}
+                                                >
+                                                    <svg viewBox="0 0 24 24">
+                                                        <path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                                                    </svg>
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
                 </div>
             </div>
         );
