@@ -5,7 +5,6 @@ import 'add-css:./style.css';
 import type SnackBarElement from 'shared/custom-els/snack-bar';
 import WorkerBridge from 'client/lazy-app/worker-bridge';
 import {
-    base64ToBlob,
     blobToImg,
     builtinDecode,
     sniffMimeType,
