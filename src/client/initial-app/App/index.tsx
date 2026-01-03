@@ -172,7 +172,7 @@ export default class App extends Component<Props, State> {
             Compress && (
               <Compress file={file!} showSnack={this.showSnack} onBack={back} />
             )
-          ) : isBulkOpen ? (
+          ) : isBulkOpen && files && files.length > 0 ? (
             BulkCompress && (
               <BulkCompress
                 files={files!}
