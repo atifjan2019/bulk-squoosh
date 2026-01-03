@@ -15,9 +15,8 @@ function subtractSets<T extends any>(set1: Set<T>, set2: Set<T>): Set<T> {
 // Initial app stuff
 import * as initialApp from 'entry-data:client/initial-app';
 import swUrl from 'service-worker:sw';
-import * as compress from 'entry-data:client/lazy-app/Compress';
+import * as bulkCompress from 'entry-data:client/lazy-app/BulkCompress';
 import * as swBridge from 'entry-data:client/lazy-app/sw-bridge';
-import * as blobAnim from 'entry-data:shared/prerendered-app/Intro/blob-anim';
 
 // The processors and codecs
 // Simple stuff everyone gets:
@@ -54,12 +53,10 @@ export function shouldCacheDynamically(url: string) {
 }
 
 let initialJs = new Set([
-  compress.main,
-  ...compress.deps,
+  bulkCompress.main,
+  ...bulkCompress.deps,
   swBridge.main,
   ...swBridge.deps,
-  blobAnim.main,
-  ...blobAnim.deps,
 ]);
 initialJs = subtractSets(
   initialJs,
