@@ -13,21 +13,26 @@ import Intro from 'shared/prerendered-app/Intro';
 import 'shared/custom-els/loading-spinner';
 
 const ROUTE_EDITOR = '/editor';
+const ROUTE_BULK = '/bulk';
 
 const compressPromise = import('client/lazy-app/Compress');
+const bulkCompressPromise = import('client/lazy-app/BulkCompress');
 const swBridgePromise = import('client/lazy-app/sw-bridge');
 
 function back() {
   window.history.back();
 }
 
-interface Props {}
+interface Props { }
 
 interface State {
   awaitingShareTarget: boolean;
   file?: File;
+  files?: File[];
   isEditorOpen: Boolean;
+  isBulkOpen: Boolean;
   Compress?: typeof import('client/lazy-app/Compress').default;
+  BulkCompress?: typeof import('client/lazy-app/BulkCompress').default;
 }
 
 export default class App extends Component<Props, State> {
@@ -36,8 +41,11 @@ export default class App extends Component<Props, State> {
       'share-target',
     ),
     isEditorOpen: false,
+    isBulkOpen: false,
     file: undefined,
+    files: undefined,
     Compress: undefined,
+    BulkCompress: undefined,
   };
 
   snackbar?: SnackBarElement;
@@ -51,6 +59,14 @@ export default class App extends Component<Props, State> {
       })
       .catch(() => {
         this.showSnack('Failed to load app');
+      });
+
+    bulkCompressPromise
+      .then((module) => {
+        this.setState({ BulkCompress: module.default });
+      })
+      .catch(() => {
+        this.showSnack('Failed to load bulk app');
       });
 
     swBridgePromise.then(async ({ offliner, getSharedImage }) => {
@@ -76,14 +92,24 @@ export default class App extends Component<Props, State> {
 
   private onFileDrop = ({ files }: FileDropEvent) => {
     if (!files || files.length === 0) return;
-    const file = files[0];
-    this.openEditor();
-    this.setState({ file });
+    if (files.length === 1) {
+      const file = files[0];
+      this.openEditor();
+      this.setState({ file, files: undefined });
+    } else {
+      this.openBulkEditor();
+      this.setState({ files: Array.from(files), file: undefined });
+    }
   };
 
-  private onIntroPickFile = (file: File) => {
-    this.openEditor();
-    this.setState({ file });
+  private onIntroPickFile = (file: File | File[]) => {
+    if (Array.isArray(file)) {
+      this.openBulkEditor();
+      this.setState({ files: file, file: undefined });
+    } else {
+      this.openEditor();
+      this.setState({ file, files: undefined });
+    }
   };
 
   private showSnack = (
@@ -95,7 +121,10 @@ export default class App extends Component<Props, State> {
   };
 
   private onPopState = () => {
-    this.setState({ isEditorOpen: location.pathname === ROUTE_EDITOR });
+    this.setState({
+      isEditorOpen: location.pathname === ROUTE_EDITOR,
+      isBulkOpen: location.pathname === ROUTE_BULK,
+    });
   };
 
   private openEditor = () => {
@@ -104,14 +133,33 @@ export default class App extends Component<Props, State> {
     const editorURL = new URL(location.href);
     editorURL.pathname = ROUTE_EDITOR;
     history.pushState(null, '', editorURL.href);
-    this.setState({ isEditorOpen: true });
+    this.setState({ isEditorOpen: true, isBulkOpen: false });
+  };
+
+  private openBulkEditor = () => {
+    if (this.state.isBulkOpen) return;
+    const bulkURL = new URL(location.href);
+    bulkURL.pathname = ROUTE_BULK;
+    history.pushState(null, '', bulkURL.href);
+    this.setState({ isBulkOpen: true, isEditorOpen: false });
   };
 
   render(
-    {}: Props,
-    { file, isEditorOpen, Compress, awaitingShareTarget }: State,
+    { }: Props,
+    {
+      file,
+      files,
+      isEditorOpen,
+      isBulkOpen,
+      Compress,
+      BulkCompress,
+      awaitingShareTarget,
+    }: State,
   ) {
-    const showSpinner = awaitingShareTarget || (isEditorOpen && !Compress);
+    const showSpinner =
+      awaitingShareTarget ||
+      (isEditorOpen && !Compress) ||
+      (isBulkOpen && !BulkCompress);
 
     return (
       <div class={style.app}>
@@ -121,6 +169,14 @@ export default class App extends Component<Props, State> {
           ) : isEditorOpen ? (
             Compress && (
               <Compress file={file!} showSnack={this.showSnack} onBack={back} />
+            )
+          ) : isBulkOpen ? (
+            BulkCompress && (
+              <BulkCompress
+                files={files!}
+                showSnack={this.showSnack}
+                onBack={back}
+              />
             )
           ) : (
             <Intro onFile={this.onIntroPickFile} showSnack={this.showSnack} />

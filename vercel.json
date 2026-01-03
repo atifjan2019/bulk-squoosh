@@ -1,0 +1,14 @@
+{
+    "build": {
+        "env": {
+            "ENABLE_FILE_SYSTEM_API": "1"
+        }
+    },
+    "outputDirectory": "build",
+    "rewrites": [
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
+        }
+    ]
+}
