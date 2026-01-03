@@ -137,10 +137,12 @@ export default class App extends Component<Props, State> {
   };
 
   private openBulkEditor = () => {
-    if (this.state.isBulkOpen) return;
+    // Change path, but preserve query string.
     const bulkURL = new URL(location.href);
-    bulkURL.pathname = ROUTE_BULK;
-    history.pushState(null, '', bulkURL.href);
+    if (bulkURL.pathname !== ROUTE_BULK) {
+      bulkURL.pathname = ROUTE_BULK;
+      history.pushState(null, '', bulkURL.href);
+    }
     this.setState({ isBulkOpen: true, isEditorOpen: false });
   };
 
