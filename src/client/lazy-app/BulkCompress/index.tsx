@@ -1,5 +1,5 @@
 
-import { h, Component } from 'preact';
+import { h, Component, Fragment } from 'preact';
 import * as style from './style.css';
 import 'add-css:./style.css';
 import type SnackBarElement from 'shared/custom-els/snack-bar';
@@ -565,7 +565,7 @@ export default class BulkCompress extends Component<Props, State> {
                                                     <div class={style.fileMeta}>
                                                         {(file.original.size / 1024).toFixed(1)} KB
                                                         {file.status === 'done' && file.resultSize && (
-                                                            <>
+                                                            <Fragment>
                                                                 <span class={style.arrow}> → </span>
                                                                 <span class={style.compressedSize}>
                                                                     {(file.resultSize / 1024).toFixed(1)} KB
@@ -573,7 +573,7 @@ export default class BulkCompress extends Component<Props, State> {
                                                                 <span class={style.savingsTag}>
                                                                     -{Math.round((1 - file.resultSize! / file.original.size) * 100)}%
                                                                 </span>
-                                                            </>
+                                                            </Fragment>
                                                         )}
                                                     </div>
                                                 </div>

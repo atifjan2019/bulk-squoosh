@@ -80,6 +80,11 @@
     margin-bottom: 24px;
 }
 
+.cardBody {
+    padding-top: 16px;
+    border-top: 1px solid #334155;
+}
+
 .cardHeader {
     display: flex;
     justify-content: space-between;
